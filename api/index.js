@@ -53,15 +53,6 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// ✅ Vercel serverless handler
-export default app;
-
-// ✅ Local development server
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
-
 // ====================== LOGIN ROUTES ======================
 
 // Faculty Login
@@ -433,7 +424,9 @@ app.put("/change-password/:userType/:userId", async (req, res) => {
 });
 
 // ====================== SERVER ======================
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
+// ✅ Vercel serverless handler
 export default app;
+
+// ✅ Local development server
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
