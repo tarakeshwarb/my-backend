@@ -8,6 +8,10 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// ✅ Debug: Check if DATABASE_URL exists
+console.log("DATABASE_URL exists:", !!process.env.DATABASE_URL);
+console.log("DATABASE_URL host:", process.env.DATABASE_URL ? process.env.DATABASE_URL.split("@")[1] : "NOT SET");
+
 // ✅ Supabase PostgreSQL connection via environment variable
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
