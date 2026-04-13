@@ -31,9 +31,13 @@ pool
 const complaintBaseSelect = `
   SELECT
     c.*,
-    b.building_name
+    b.building_name,
+    i.mobile_no AS incharge_mobile
   FROM complaints c
   LEFT JOIN building b ON b.building_id = c.building_id
+  LEFT JOIN incharge i
+    ON i.name = c.assigned_incharge
+   AND i.building_id = c.building_id
 `;
 
 // ====================== ADMIN ======================
