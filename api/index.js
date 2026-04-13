@@ -31,10 +31,8 @@ pool
 const complaintBaseSelect = `
   SELECT
     c.*,
-    COALESCE(f.faculty_name, c.faculty_id) AS faculty_name,
     b.building_name
   FROM complaints c
-  LEFT JOIN faculty f ON f.faculty_id = c.faculty_id
   LEFT JOIN building b ON b.building_id = c.building_id
 `;
 
@@ -70,22 +68,47 @@ app.get("/health", (_req, res) => {
 
 // ====================== LOGIN ROUTES ======================
 
+const authenticateEmailUser = async (emailId, password) => {
+  const result = await pool.query(
+    `SELECT role, user_data
+     FROM (
+       SELECT 1 AS priority, 'faculty'::text AS role, to_jsonb(f) AS user_data
+       FROM faculty f
+       WHERE f.email_id = $1 AND f.password = $2
+
+       UNION ALL
+
+       SELECT 2 AS priority, 'admin'::text AS role, to_jsonb(a) AS user_data
+       FROM admin a
+       WHERE a.email_id = $1 AND a.password = $2
+
+       UNION ALL
+
+       SELECT 3 AS priority, 'incharge'::text AS role, to_jsonb(i) AS user_data
+       FROM incharge i
+       WHERE i.email_id = $1 AND i.password = $2
+     ) AS matches
+     ORDER BY priority
+     LIMIT 1`,
+    [emailId, password]
+  );
+
+  return result.rows[0] || null;
+};
+
 app.post("/login/faculty", async (req, res) => {
   const { email_id, password } = req.body;
   try {
-    const result = await pool.query(
-      "SELECT * FROM faculty WHERE email_id = $1 AND password = $2",
-      [email_id, password]
-    );
+    const authResult = await authenticateEmailUser(email_id, password);
 
-    if (result.rows.length === 0) {
+    if (!authResult) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     return res.json({
       message: "Login successful",
-      user: result.rows[0],
-      role: "faculty",
+      user: authResult.user_data,
+      role: authResult.role,
     });
   } catch (err) {
     console.error("Faculty login error:", err);
@@ -179,10 +202,29 @@ app.get("/buildings", async (_req, res) => {
 // ====================== COMPLAINT MANAGEMENT ======================
 
 app.post("/complaints", async (req, res) => {
-  const { category, type, classroom, description, faculty_id, building_id } =
+  const {
+    category,
+    type,
+    classroom,
+    description,
+    submitted_by_id,
+    faculty_id,
+    building_id,
+  } =
     req.body;
 
-  if (!category || !type || !classroom || !description || !faculty_id || !building_id) {
+  const rawSubmitterId = submitted_by_id ?? faculty_id;
+  const submitterId = Number.parseInt(String(rawSubmitterId), 10);
+  const parsedBuildingId = Number.parseInt(String(building_id), 10);
+
+  if (
+    !category ||
+    !type ||
+    !classroom ||
+    !description ||
+    Number.isNaN(submitterId) ||
+    Number.isNaN(parsedBuildingId)
+  ) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
@@ -193,7 +235,7 @@ app.post("/complaints", async (req, res) => {
        WHERE TRIM(LOWER(role)) = TRIM(LOWER($1))
          AND building_id = $2
        LIMIT 1`,
-      [category, building_id]
+      [category, parsedBuildingId]
     );
 
     if (inchargeResult.rows.length === 0) {
@@ -206,7 +248,7 @@ app.post("/complaints", async (req, res) => {
 
     const insertResult = await pool.query(
       `INSERT INTO complaints
-       (category, type, classroom, status, description, faculty_id, assigned_incharge, building_id, created_at)
+       (category, type, classroom, status, description, submitted_by_id, assigned_incharge, building_id, created_at)
        VALUES ($1, $2, $3, 'Pending', $4, $5, $6, $7, NOW())
        RETURNING *`,
       [
@@ -214,9 +256,9 @@ app.post("/complaints", async (req, res) => {
         type,
         classroom,
         description,
-        faculty_id,
+        submitterId,
         assignedIncharge,
-        building_id,
+        parsedBuildingId,
       ]
     );
 
@@ -306,10 +348,15 @@ app.get("/complaints/worker/:name", async (req, res) => {
 app.get("/complaints/faculty/:faculty_id", async (req, res) => {
   const { faculty_id } = req.params;
   const { status } = req.query;
+  const parsedSubmitterId = Number.parseInt(String(faculty_id), 10);
+
+  if (Number.isNaN(parsedSubmitterId)) {
+    return res.status(400).json({ error: "faculty_id must be an integer" });
+  }
 
   try {
-    let query = `${complaintBaseSelect} WHERE c.faculty_id = $1`;
-    const params = [faculty_id];
+    let query = `${complaintBaseSelect} WHERE c.submitted_by_id = $1`;
+    const params = [parsedSubmitterId];
 
     if (status && status !== "total") {
       query += " AND c.status = $2";
@@ -411,9 +458,12 @@ app.put("/change-password/:userType/:userId", async (req, res) => {
 
     switch (userType) {
       case "faculty":
+        if (Number.isNaN(Number.parseInt(String(userId), 10))) {
+          return res.status(400).json({ error: "faculty userId must be an integer" });
+        }
         query =
           "UPDATE faculty SET password = $1 WHERE faculty_id = $2 RETURNING faculty_name as name";
-        params = [newPassword, userId];
+        params = [newPassword, Number.parseInt(String(userId), 10)];
         break;
       case "incharge":
         query =
